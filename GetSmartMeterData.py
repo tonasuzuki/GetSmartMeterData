@@ -356,7 +356,7 @@ def main(arg1, arg2):
     fIntegratedpower=echonet.GetIntegratedpower()
     logging.info(u"積算電力量計測値:{0}[KW]".format(fIntegratedpower))
     boxled.off(4)
-    # POST HomeAssistant
+    # 2データとも取得できているときのみPOST HomeAssistant
     if nMeasuredPower > 0 and fIntegratedpower > 0: 
         try:
             response = requests.post(
