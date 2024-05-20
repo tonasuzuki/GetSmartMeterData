@@ -357,15 +357,16 @@ def main(arg1, arg2):
     logging.info(u"積算電力量計測値:{0}[KW]".format(fIntegratedpower))
     boxled.off(4)
     # POST HomeAssistant
-    try:
-        response = requests.post(
-            HA_URL,
-            json={'measuredpower': nMeasuredPower, 'integratedpower': fIntegratedpower},
-            headers={"Content-Type": "application/json"}
-        )
-    except Exception as e:
-        logging.info('ERROR: Post webhook')
-        boxled.off(3)
+    if nMeasuredPower > 0 and fIntegratedpower > 0: 
+        try:
+            response = requests.post(
+                HA_URL,
+                json={'measuredpower': nMeasuredPower, 'integratedpower': fIntegratedpower},
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception as e:
+            logging.info('ERROR: Post webhook')
+            boxled.off(3)
 
 def _atexit():
     boxled.clear()
