@@ -361,8 +361,8 @@ def main(arg1, arg2):
     fIntegratedpower=echonet.GetIntegratedpower()
     logging.info(u"積算電力量計測値:{0}[KW]".format(fIntegratedpower))
     boxled.off(4)
-    # 2データとも取得できているときのみPOST HomeAssistant
-    if nMeasuredPower > 0 and fIntegratedpower > 0: 
+    # 2データとも取得できており、異常値出ない場合のみPOST HomeAssistant
+    if (6000 > nMeasuredPower > 0 and 10000 > fIntegratedpower > 0) :
         try:
             response = requests.post(
                 HA_URL,
