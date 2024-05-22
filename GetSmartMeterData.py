@@ -261,7 +261,12 @@ class CommEchoNet:
     # 初期化。最初の一度だけ実行する。
     def InitConnection(self):
         #Send ID/PASSWORD
-        bResult=self.SetID(B_ROUTE_ID,B_ROUTE_PW)
+        logging.debug("B_ROUTE_ID(len): " + len(B_ROUTE_ID))
+        logging.debug("B_ROUTE_PW(len): " + len(B_ROUTE_PW))
+        if (len(B_ROUTE_ID)!=32 or len(B_ROUTE_PW)!=12) :
+            logging.info('B_ROUTE_IDまたはB_ROUTE_PWの桁数が正しくありません')
+            return(False)
+        bResult=self.SetID(B_ROUTE_ID.upper(),B_ROUTE_PW.upper())
         if (not bResult) :
             return(False) 
         #
