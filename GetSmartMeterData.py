@@ -3,7 +3,8 @@
 
 # Get SmartMeter(Wi-SUN Profile for ECHONET Lite)
 #
-# 2024/03/03 ver:1.0 tonasuzuki
+# 2024/03/03 ver:1.00 tonasuzuki
+# 2024/05/22 ver:1.01 tonasuzuki
 #
 #
 
@@ -29,28 +30,27 @@ import atexit
 #
 # ----------------
 # Bルートサービス 設定情報
-B_ROUTE_ID     = '0123456789abcdef0123456789abcdef' # 認証ID
-B_ROUTE_PW     = '0123456789ab'                     # パスワード
+B_ROUTE_ID     = '0123456789ABCDEF0123456789ABCDEF' # 認証ID
+B_ROUTE_PW     = '0123456789AB'                     # パスワード
 # ----------------
 # シリアルポート設定
 SERIAL_PORT  = '/dev/ttyS1'
 SERIAL_SPEED = 115200
 SERIAL_TIMEOUT = 5
-COMMAND_TIMEOUT = 30
 # ----------------
 # データ取得設定
 CONNECT_RETRY_COUNT = 4  #EchoNet機器スキャンリトライ回数
-UPDATE_DATA_TIME = 120   #データ取得間隔(秒)
+COMMAND_TIMEOUT = 30     #EchoNetコマンド返答までの待ち時間(秒)
+UPDATE_DATA_TIME = 60    #データ取得間隔(秒)
 # ----------------
 # デバッグログ設定 (実運用時はコメントアウトする)
+# (詳細なログを出力する場合は、level=logging.DEBUG を設定する）
 #logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s:%(name)s - %(message)s")
-
 # ----------------
 # HomeAssistantのWebhook URL
 HA_URL = 'http://homeassistant.local:8123/api/webhook/echonet-aki-wi-sun'
 
 # ----------設定ここまで ----------
-
 
 ## Wi-SUN Profile Connection Class for ECHONET Lite
 #
@@ -135,11 +135,15 @@ class CommEchoNet:
         bResult = False 
         # Bルート認証ID設定
         logging.info('Bルート認証ID設定')
-        bResult= self.SendCommand("SKSETRBID " + szID)
+        if (len(szID)==32):
+            bResult = self.SendCommand("SKSETRBID " + szID)
         if (bResult):
-            # Bルート認証パスワード設定
-            logging.info('Bルートパスワード設定')
-            bResult= self.SendCommand("SKSETPWD C " + szPassword)
+            bResult= False
+            nPwLen = len(szPassword)
+            if ((nPwLen>0) and (nPwLen<=32)) :
+                # Bルート認証パスワード設定
+                logging.info('Bルートパスワード設定')
+                bResult= self.SendCommand("SKSETPWD " + format(nPwLen,'x') + " " + szPassword )
         return (bResult)
 
     # Bルートサービス設定を元に、接続可能なデバイスを探す
@@ -229,7 +233,6 @@ class CommEchoNet:
     #ECHOnet liteコマンドを送信し、結果を返す
     def SendEchonetCommand(self,szEPC):
         nResult=0
-        logging.info('EchoNetデータ取得')
         # 瞬時電力計測値取得コマンドフレーム
         szEchonetCommandHeader = b'\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01'
         szEchonetCommand = szEchonetCommandHeader + szEPC + b'\00'
@@ -253,8 +256,9 @@ class CommEchoNet:
                 # 正常結果か?
                 if ((esv == "72") and (pdc>0)) :
                     # 結果を取得する
-                    nResult = int(szEData[28:28+(pdc*2)],16)  # 86bytes目からPDCバイトがEDT(結果の数値)
+                    nResult = int(szEData[28:28+(pdc*2)],16)  # 28bytes目から(PDC*2)bytesがEDT(結果の数値)
                     bConnected = True
+        logging.info('EchoNetデータ取得:' + str(nResult))
         return(nResult)
 
 
@@ -263,6 +267,7 @@ class CommEchoNet:
         #Send ID/PASSWORD
         bResult=self.SetID(B_ROUTE_ID,B_ROUTE_PW)
         if (not bResult) :
+            logging.info('認証IDまたはパスワードの記載に誤りがあります')
             return(False) 
         #
         bResult=False
@@ -285,25 +290,27 @@ class CommEchoNet:
             return(False) 
         return (True)
 
-    #瞬時電力計測値を取得する
+    #瞬時電力計測値を取得する (取得できなかった場合は0を返します)
     def GetMeasuredPower(self):
         szEPC = b'\xE7'
         nResult=self.SendEchonetCommand(szEPC)
         return(nResult)
 
-    #積算電力量 計測値 を取得する
+    #積算電力量 計測値 を取得する (取得できなかった場合は0を返します)
     def GetIntegratedpower(self):
+        fResult=float(0)
         #積算電力量の単位テーブル
         dictUnit = {0:1,1:0.1,2:0.01,3:0.001,4:0.0001,10:10,11:100,12:1000,13:10000}
         #積算電力量の単位を取得する
         szEPC = b'\xE1'
         nUnitTable=self.SendEchonetCommand(szEPC)
-        fUnit=float(dictUnit.get(nUnitTable, 1))
+        fUnit=float(dictUnit.get(nUnitTable, 0))
         #積算電力量計測値を取得する
         szEPC = b'\xE0'
         nResult=self.SendEchonetCommand(szEPC)
         #積算電力量計測値を算出する
-        fResult=float(nResult)*fUnit
+        if ((nResult>0) and (nResult<99999999)):
+            fResult=float(nResult)*fUnit
         return(fResult)
 #class CommEchoNet
 
@@ -356,8 +363,8 @@ def main(arg1, arg2):
     fIntegratedpower=echonet.GetIntegratedpower()
     logging.info(u"積算電力量計測値:{0}[KW]".format(fIntegratedpower))
     boxled.off(4)
-    # 2データとも取得できているときのみPOST HomeAssistant
-    if nMeasuredPower > 0 and fIntegratedpower > 0: 
+    # POST HomeAssistant
+    if ((nMeasuredPower > 0) and (fIntegratedpower > 0)): 
         try:
             response = requests.post(
                 HA_URL,
