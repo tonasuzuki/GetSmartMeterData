@@ -5,6 +5,7 @@
 #
 # 2024/03/03 ver:1.00 tonasuzuki
 # 2024/05/22 ver:1.01 tonasuzuki
+# 2024/08/06 ver:1.02 tonasuzuki
 #
 #
 
@@ -230,9 +231,9 @@ class CommEchoNet:
         szData = self.__ser.readline().decode(encoding='utf-8')
         return (bResult)
 
-    #ECHOnet liteコマンドを送信し、結果を返す
+    #ECHOnet liteコマンドを送信し、結果を返す (取得できなかった場合は-1を返します)
     def SendEchonetCommand(self,szEPC):
-        nResult=0
+        nResult=int(-1)
         # 瞬時電力計測値取得コマンドフレーム
         szEchonetCommandHeader = b'\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01'
         szEchonetCommand = szEchonetCommandHeader + szEPC + b'\00'
@@ -292,8 +293,11 @@ class CommEchoNet:
 
     #瞬時電力計測値を取得する (取得できなかった場合は0を返します)
     def GetMeasuredPower(self):
+        nResult=int(0)
         szEPC = b'\xE7'
-        nResult=self.SendEchonetCommand(szEPC)
+        nEchonetResult=self.SendEchonetCommand(szEPC)
+        if (nEchonetResult>=0) :
+            nResult=nEchonetResult 
         return(nResult)
 
     #積算電力量 計測値 を取得する (取得できなかった場合は0を返します)
@@ -304,13 +308,14 @@ class CommEchoNet:
         #積算電力量の単位を取得する
         szEPC = b'\xE1'
         nUnitTable=self.SendEchonetCommand(szEPC)
-        fUnit=float(dictUnit.get(nUnitTable, 0))
-        #積算電力量計測値を取得する
-        szEPC = b'\xE0'
-        nResult=self.SendEchonetCommand(szEPC)
-        #積算電力量計測値を算出する
-        if ((nResult>0) and (nResult<99999999)):
-            fResult=float(nResult)*fUnit
+        if (nUnitTable>=0) :
+            fUnit=float(dictUnit.get(nUnitTable, 0))
+            #積算電力量計測値を取得する
+            szEPC = b'\xE0'
+            nEchonetResult=self.SendEchonetCommand(szEPC)
+            #積算電力量計測値を算出する
+            if ((nEchonetResult>=0) and (nEchonetResult<=99999999)) :
+                fResult=float(nEchonetResult)*fUnit
         return(fResult)
 #class CommEchoNet
 
