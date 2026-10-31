@@ -233,35 +233,47 @@ class CommEchoNet:
 
     #ECHOnet liteコマンドを送信し、結果を返す (取得できなかった場合は-1を返します)
     def SendEchonetCommand(self,szEPC):
-        nResult=int(-1)
-        # 瞬時電力計測値取得コマンドフレーム
-        szEchonetCommandHeader = b'\x10\x81\x00\x01\x05\xFF\x01\x02\x88\x01\x62\x01'
-        szEchonetCommand = szEchonetCommandHeader + szEPC + b'\00'
+        # 要求ごとにTIDを更新し、現在の要求に対応する正常応答だけを採用する。
+        self._echonet_tid = (getattr(self, '_echonet_tid', 0) + 1) & 0xffff
+        tid = self._echonet_tid
+        request_seoj = bytes.fromhex('05ff01')
+        request_deoj = bytes.fromhex('028801')
+        szEchonetCommand = (b'\x10\x81' + tid.to_bytes(2, 'big') +
+                            request_seoj + request_deoj + b'\x62\x01' + szEPC + b'\x00')
         szCommand = "SKSENDTO 1 {0} 0E1A 1 0 {1:04X} ".format(self.LocalIPAddr, len(szEchonetCommand))
-        bResult= self.SendCommand(szCommand , szEchonetCommand)
-        bConnected = False
-        fTimeOut = time.time() + float(COMMAND_TIMEOUT)
-        while ((not bConnected) and (fTimeOut > time.time() )) :
-            # 返信データ取得
-            szData = self.__ser.readline().decode(encoding='utf-8')
-            logging.debug(szData)
-            # 結果データを得る
-            if szData.startswith("ERXUDP"):
-                ResultCols = szData.strip().split(' ')  #結果をスペースごとに分ける
-                szEData = ResultCols[9]  # 9個目が結果データ(EData)
-                seoj = szEData[ 8:8 +6]  # 8bytes目から6bytesがSEOJ(送信元ECHONET Liteオブジェクト) 
-                deoj = szEData[14:14+6]  # 14bytes目から6bytesがDEOJ(受信先ECHONET Liteオブジェクト) 
-                esv  = szEData[20:20+2]  # 20bytes目から2bytesがESV(ECHONET Liteサービス結果)
-                epc  = szEData[24:24+2]  # 24bytes目から2bytesがEPC(ECHONET Liteプロパティ)
-                pdc  = int(szEData[26:26+2],16)  # 26bytes目から2bytesがPDC(EDTのバイト数)
-                # 正常結果か?
-                if ((esv == "72") and (pdc>0)) :
-                    # 結果を取得する
-                    nResult = int(szEData[28:28+(pdc*2)],16)  # 28bytes目から(PDC*2)bytesがEDT(結果の数値)
-                    bConnected = True
-        logging.info('EchoNetデータ取得:' + str(nResult))
-        return(nResult)
+        if not self.SendCommand(szCommand, szEchonetCommand):
+            return -1
 
+        fTimeOut = time.time() + float(COMMAND_TIMEOUT)
+        while time.time() < fTimeOut:
+            szData = self.__ser.readline().decode(encoding='utf-8', errors='replace')
+            logging.debug(szData)
+            if not szData.startswith('ERXUDP'):
+                continue
+            cols = szData.strip().split()
+            if len(cols) < 10:
+                continue
+            try:
+                packet = bytes.fromhex(cols[9])
+            except ValueError:
+                continue
+            # EHD(2), TID(2), SEOJ(3), DEOJ(3), ESV(1), OPC(1), EPC(1), PDC(1)
+            if len(packet) < 14 or packet[:2] != b'\x10\x81':
+                continue
+            if (int.from_bytes(packet[2:4], 'big') != tid or
+                    packet[4:7] != request_deoj or
+                    packet[7:10] != request_seoj or
+                    packet[10:12] != b'\x72\x01' or
+                    packet[12:13] != szEPC):
+                continue
+            pdc = packet[13]
+            if pdc == 0 or len(packet) != 14 + pdc:
+                continue
+            nResult = int.from_bytes(packet[14:], 'big')
+            logging.info('EchoNetデータ取得:' + str(nResult))
+            return nResult
+        logging.info('EchoNetデータ取得:-1')
+        return -1
 
     # 初期化。最初の一度だけ実行する。
     def InitConnection(self):
