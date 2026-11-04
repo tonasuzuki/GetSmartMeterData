@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
+# 2026-11-04: PR #7 のレビュー負担を減らすためのコメント追加。
+# 応答照合の根拠のみ説明し、通信処理や判定条件は変更しない。
 
 # Get SmartMeter(Wi-SUN Profile for ECHONET Lite)
 #
@@ -233,11 +235,14 @@ class CommEchoNet:
 
     #ECHOnet liteコマンドを送信し、結果を返す (取得できなかった場合は-1を返します)
     def SendEchonetCommand(self,szEPC):
+        # TIDは16ビットで循環し、以前の要求の遅延応答との混同を防ぐ。
         # 要求ごとにTIDを更新し、現在の要求に対応する正常応答だけを採用する。
         self._echonet_tid = (getattr(self, '_echonet_tid', 0) + 1) & 0xffff
         tid = self._echonet_tid
+        # 05FF01: コントローラ、028801: 低圧スマート電力量メータ。
         request_seoj = bytes.fromhex('05ff01')
         request_deoj = bytes.fromhex('028801')
+        # Get要求（ESV=0x62）、プロパティ1件（OPC=1）、要求データなし（PDC=0）。
         szEchonetCommand = (b'\x10\x81' + tid.to_bytes(2, 'big') +
                             request_seoj + request_deoj + b'\x62\x01' + szEPC + b'\x00')
         szCommand = "SKSENDTO 1 {0} 0E1A 1 0 {1:04X} ".format(self.LocalIPAddr, len(szEchonetCommand))
@@ -250,6 +255,7 @@ class CommEchoNet:
             logging.debug(szData)
             if not szData.startswith('ERXUDP'):
                 continue
+            # ERXUDPの10番目のフィールドがECHONET Liteフレームの16進文字列。
             cols = szData.strip().split()
             if len(cols) < 10:
                 continue
@@ -257,15 +263,19 @@ class CommEchoNet:
                 packet = bytes.fromhex(cols[9])
             except ValueError:
                 continue
+            # 固定ヘッダは14バイト。短いフレームや形式不一致を除外する。
             # EHD(2), TID(2), SEOJ(3), DEOJ(3), ESV(1), OPC(1), EPC(1), PDC(1)
             if len(packet) < 14 or packet[:2] != b'\x10\x81':
                 continue
+            # TID・EPCが一致する現在の要求のGet_Res（ESV=0x72）だけを採用する。
+            # 応答では送信元SEOJと宛先DEOJが要求と逆になる。OPC=1は1件を表す。
             if (int.from_bytes(packet[2:4], 'big') != tid or
                     packet[4:7] != request_deoj or
                     packet[7:10] != request_seoj or
                     packet[10:12] != b'\x72\x01' or
                     packet[12:13] != szEPC):
                 continue
+            # PDCはEDTの長さ（バイト単位）。フレーム全体の長さと照合する。
             pdc = packet[13]
             if pdc == 0 or len(packet) != 14 + pdc:
                 continue
